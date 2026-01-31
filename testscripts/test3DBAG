@@ -1,0 +1,186 @@
+"""
+Test script: Wat zit er allemaal in 3DBAG?
+"""
+import requests
+import json
+
+# Test BAG pand ID (Oldenbarnevelderweg 111 Barneveld)
+TEST_PAND_IDS = [
+    "0203100001026746",  # 2^1kap nieuwbouw
+    "0203100000006440",  # Ouder pand Barneveld
+]
+
+def get_3dbag_data(bag_pand_id):
+    """Haal alle data op uit 3DBAG voor een pand - probeer meerdere endpoints"""
+    
+    # Methode 1: OGC API Features
+    endpoints = [
+        f"https://api.3dbag.nl/collections/pand/items/{bag_pand_id}",
+        f"https://data.3dbag.nl/api/BAG3D/pand/{bag_pand_id}",
+        f"https://api.3dbag.nl/pand/{bag_pand_id}",
+    ]
+    
+    for url in endpoints:
+        print(f"  Trying: {url}")
+        try:
+            r = requests.get(url, timeout=15, headers={"Accept": "application/json"})
+            print(f"  Status: {r.status_code}")
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            print(f"  Error: {e}")
+    
+    # Methode 2: WFS
+    print("  Trying: WFS...")
+    wfs_url = "https://data.3dbag.nl/api/BAG3D_v2/wfs"
+    params = {
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "GetFeature",
+        "typeName": "BAG3D_v2:lod12",
+        "outputFormat": "application/json",
+        "filter": f"<Filter><PropertyIsEqualTo><PropertyName>identificatie</PropertyName><Literal>NL.IMBAG.Pand.{bag_pand_id}</Literal></PropertyIsEqualTo></Filter>"
+    }
+    try:
+        r = requests.get(wfs_url, params=params, timeout=15)
+        print(f"  WFS Status: {r.status_code}")
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("features"):
+                return data["features"][0]
+    except Exception as e:
+        print(f"  WFS Error: {e}")
+    
+    # Methode 3: Direct download tile check
+    print("  Trying: Tile download info...")
+    tile_url = "https://3dbag.nl/en/download"
+    print(f"  (3DBAG biedt ook bulk downloads per tile)")
+    
+    return None
+
+def print_3dbag_fields(data):
+    """Print alle velden uit 3DBAG response"""
+    if not data:
+        print("Geen data")
+        return
+    
+    props = data.get("properties", {})
+    
+    print("\n" + "="*70)
+    print("3DBAG VELDEN OVERZICHT")
+    print("="*70)
+    
+    # Print alle velden gesorteerd
+    print("\n📋 ALLE VELDEN:")
+    print("-"*70)
+    
+    for key, value in sorted(props.items()):
+        # Skip hele lange arrays
+        if isinstance(value, list) and len(str(value)) > 100:
+            print(f"  {key}: [array met {len(value)} items]")
+        elif isinstance(value, dict):
+            print(f"  {key}: {{dict met {len(value)} keys}}")
+        else:
+            print(f"  {key}: {value}")
+    
+    # Interessante velden highlighten
+    print("\n" + "="*70)
+    print("🎯 INTERESSANTE VELDEN VOOR BUURTCAMPAGNE")
+    print("="*70)
+    
+    interesting = {
+        "b3_h_dak_50p": "Dakhoogte (50e percentiel)",
+        "b3_h_dak_70p": "Dakhoogte (70e percentiel)", 
+        "b3_h_dak_max": "Dakhoogte maximum",
+        "b3_h_dak_min": "Dakhoogte minimum",
+        "b3_h_maaiveld": "Hoogte maaiveld",
+        "b3_volume_lod12": "Volume LOD1.2 (m³)",
+        "b3_volume_lod13": "Volume LOD1.3 (m³)",
+        "b3_volume_lod22": "Volume LOD2.2 (m³)",
+        "b3_opp_grond": "Grondoppervlak/footprint (m²)",
+        "b3_opp_dak_plat": "Oppervlak plat dak (m²)",
+        "b3_opp_dak_schuin": "Oppervlak schuin dak (m²)",
+        "b3_opp_scheidingsmuur": "Oppervlak scheidingsmuur (m²)",
+        "b3_opp_buitenmuur": "Oppervlak buitenmuur (m²)",
+        "b3_bouwlagen": "Aantal bouwlagen",
+        "b3_pw_datum": "Datum puntenwolk",
+        "b3_azimut": "Dak oriëntatie (graden, 0=N, 90=O, 180=Z)",
+        "b3_hellingshoek": "Dak hellingshoek (graden)",
+        "b3_kas_warenhuis": "Is kas/warenhuis",
+        "b3_mutatie_ahn": "Mutatie sinds AHN",
+        "b3_nodata_fractie_ahn": "Fractie zonder AHN data",
+        "b3_rmse_lod12": "RMSE LOD1.2 (nauwkeurigheid)",
+        "b3_rmse_lod13": "RMSE LOD1.3",
+        "b3_rmse_lod22": "RMSE LOD2.2",
+        "b3_val3dity_lod12": "Validatie LOD1.2",
+        "b3_val3dity_lod22": "Validatie LOD2.2",
+    }
+    
+    print("\n")
+    for key, description in interesting.items():
+        value = props.get(key, "—")
+        if value is not None and value != "—":
+            # Format numbers nicely
+            if isinstance(value, float):
+                value = f"{value:.1f}"
+            print(f"  {description:40} | {key:25} | {value}")
+    
+    # Bereken extra metrics
+    print("\n" + "="*70)
+    print("📊 BEREKENDE METRICS")
+    print("="*70)
+    
+    grond_opp = props.get("b3_opp_grond")
+    volume = props.get("b3_volume_lod22") or props.get("b3_volume_lod12")
+    bouwlagen = props.get("b3_bouwlagen")
+    h_max = props.get("b3_h_dak_max")
+    h_maaiveld = props.get("b3_h_maaiveld")
+    
+    if grond_opp:
+        print(f"  Footprint (grondoppervlak): {grond_opp:.0f} m²")
+    
+    if volume and grond_opp:
+        geschatte_hoogte = volume / grond_opp
+        print(f"  Geschatte gem. hoogte: {geschatte_hoogte:.1f} m")
+    
+    if h_max and h_maaiveld:
+        gebouw_hoogte = h_max - h_maaiveld
+        print(f"  Gebouwhoogte: {gebouw_hoogte:.1f} m")
+        if gebouw_hoogte > 0:
+            geschatte_lagen = gebouw_hoogte / 2.8  # ~2.8m per laag
+            print(f"  Geschatte bouwlagen: {geschatte_lagen:.1f}")
+    
+    if bouwlagen:
+        print(f"  Bouwlagen (3DBAG): {bouwlagen}")
+    
+    # Dak analyse
+    dak_plat = props.get("b3_opp_dak_plat", 0) or 0
+    dak_schuin = props.get("b3_opp_dak_schuin", 0) or 0
+    if dak_plat + dak_schuin > 0:
+        pct_plat = (dak_plat / (dak_plat + dak_schuin)) * 100
+        print(f"  Daktype: {'Plat' if pct_plat > 70 else 'Schuin' if pct_plat < 30 else 'Gemengd'} ({pct_plat:.0f}% plat)")
+    
+    azimut = props.get("b3_azimut")
+    if azimut is not None:
+        # Converteer naar windrichting
+        richtingen = ["N", "NO", "O", "ZO", "Z", "ZW", "W", "NW"]
+        idx = int((azimut + 22.5) / 45) % 8
+        print(f"  Dak oriëntatie: {azimut:.0f}° ({richtingen[idx]})")
+
+if __name__ == "__main__":
+    for pand_id in TEST_PAND_IDS:
+        print(f"\n{'#'*70}")
+        print(f"# PAND: {pand_id}")
+        print(f"{'#'*70}")
+        
+        data = get_3dbag_data(pand_id)
+        print_3dbag_fields(data)
+        
+        # Raw JSON output voor debugging
+        print("\n\n📄 RAW JSON (eerste 2000 chars):")
+        print("-"*70)
+        if data:
+            raw = json.dumps(data.get("properties", {}), indent=2)
+            print(raw[:2000])
+            if len(raw) > 2000:
+                print(f"\n... ({len(raw)} chars totaal)")
