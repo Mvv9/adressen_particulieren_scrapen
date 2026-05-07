@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%%TITEL%%</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',system-ui,sans-serif;background:#0f172a;color:#e2e8f0}
+#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:1}
+
+/* ── Status bar ── */
+.status-bar{
+  position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;
+  background:rgba(15,23,42,.95);backdrop-filter:blur(16px);
+  border:1px solid rgba(148,163,184,.15);border-radius:12px;
+  padding:12px 24px;display:flex;align-items:center;gap:16px;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
+  transition:all .3s;
+}
+.status-bar.connected{border-color:rgba(34,197,94,.4)}
+.status-bar.error{border-color:rgba(239,68,68,.4)}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#64748b;transition:background .3s}
+.status-bar.connected .status-dot{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,.5)}
+.status-bar.loading .status-dot{background:#eab308;animation:pulse 1s infinite}
+.status-bar.error .status-dot{background:#ef4444}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.status-text{font-size:13px;font-weight:500}
+.status-progress{font-variant-numeric:tabular-nums;color:#94a3b8}
+
+/* ── Filter panel ── */
+.filter-panel{
+  position:absolute;top:14px;left:14px;z-index:1000;
+  background:rgba(15,23,42,.92);backdrop-filter:blur(16px);
+  border:1px solid rgba(148,163,184,.15);border-radius:14px;
+  padding:18px 20px 14px;width:280px;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
+}
+.fp-title{font-size:15px;font-weight:700;letter-spacing:-.02em;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.fp-title svg{flex-shrink:0}
+.fp-group{margin-bottom:14px}
+.fp-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:6px}
+.fp-pills{display:flex;gap:4px}
+.fp-pill{
+  flex:1;text-align:center;padding:7px 0;font-size:12px;font-weight:600;
+  border-radius:8px;cursor:pointer;transition:all .15s;
+  border:1px solid rgba(148,163,184,.2);background:transparent;color:#94a3b8;
+}
+.fp-pill:hover{border-color:rgba(148,163,184,.4);color:#cbd5e1}
+.fp-pill.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.fp-pill.active.koop{background:#22c55e;border-color:#22c55e}
+.fp-pill.active.huur{background:#f97316;border-color:#f97316}
+.fp-pill.active.solar-yes{background:#eab308;border-color:#eab308}
+.fp-pill.active.solar-no{background:#64748b;border-color:#64748b}
+.fp-count.solar .fp-count-num{color:#facc15}
+.fp-range-wrap{position:relative}
+.fp-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;background:rgba(148,163,184,.2);border-radius:3px;outline:none}
+.fp-range::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#3b82f6;border:2px solid #1e293b;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.fp-range-val{position:absolute;right:0;top:-2px;font-size:13px;font-weight:700;color:#e2e8f0;font-variant-numeric:tabular-nums}
+.fp-counts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(148,163,184,.12)}
+.fp-count{background:rgba(148,163,184,.08);border-radius:8px;padding:8px 10px;text-align:center}
+.fp-count-num{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+.fp-count-label{font-size:10px;color:#94a3b8;margin-top:2px;text-transform:uppercase;letter-spacing:.04em}
+.fp-count.koop .fp-count-num{color:#4ade80}
+.fp-count.huur .fp-count-num{color:#fb923c}
+.fp-count.fam .fp-count-num{color:#60a5fa}
+.fp-count.total .fp-count-num{color:#e2e8f0}
+.fp-export{margin-top:10px;width:100%;padding:10px;font-size:13px;font-weight:600;border:1px solid rgba(148,163,184,.2);border-radius:8px;background:rgba(148,163,184,.06);color:#e2e8f0;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit}
+.fp-export:hover{background:rgba(59,130,246,.15);border-color:#3b82f6;color:#93c5fd}
+
+/* ── Layer toggle ── */
+.layer-toggle{
+  position:absolute;top:14px;right:14px;z-index:1000;
+  background:rgba(15,23,42,.92);backdrop-filter:blur(16px);
+  border:1px solid rgba(148,163,184,.15);border-radius:10px;
+  padding:8px;display:flex;gap:4px;
+  box-shadow:0 4px 16px rgba(0,0,0,.3);
+}
+.layer-btn{
+  padding:8px 12px;font-size:11px;font-weight:600;border-radius:6px;
+  border:none;background:transparent;color:#94a3b8;cursor:pointer;transition:all .15s;
+}
+.layer-btn:hover{color:#e2e8f0}
+.layer-btn.active{background:rgba(59,130,246,.2);color:#93c5fd}
+
+/* ── CBS panel (collapsed by default during loading) ── */
+.cbs-panel{
+  position:absolute;top:60px;right:14px;z-index:1000;
+  background:rgba(15,23,42,.92);backdrop-filter:blur(16px);
+  border:1px solid rgba(148,163,184,.15);border-radius:14px;
+  padding:16px 18px;width:230px;max-height:calc(100vh - 90px);overflow-y:auto;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
+  display:none;
+}
+.cbs-panel.show{display:block}
+.cbs-panel::-webkit-scrollbar{width:4px}
+.cbs-panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.3);border-radius:2px}
+.cb-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.cb-section{padding:8px 0;border-bottom:1px solid rgba(148,163,184,.1)}
+.cb-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:4px}
+.cb-grid{display:flex;justify-content:space-between;font-size:13px}
+.cb-dim{color:#64748b;font-size:12px}
+.cb-bar-wrap{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;color:#94a3b8}
+.cb-bar{height:5px;border-radius:3px;min-width:2px;flex-shrink:0}
+.cb-split{display:flex;gap:6px;margin-bottom:4px}
+.cb-chip{font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px}
+.cb-chip.koop{background:rgba(34,197,94,.15);color:#4ade80}
+.cb-chip.huur{background:rgba(249,115,22,.15);color:#fb923c}
+
+/* ── Popup ── */
+.leaflet-popup-content-wrapper{background:rgba(15,23,42,.95)!important;backdrop-filter:blur(12px);border:1px solid rgba(148,163,184,.15)!important;border-radius:12px!important;box-shadow:0 8px 32px rgba(0,0,0,.4)!important;color:#e2e8f0!important}
+.leaflet-popup-tip{background:rgba(15,23,42,.95)!important}
+.leaflet-popup-content{font-size:12px;line-height:1.6;min-width:220px;font-family:'DM Sans',system-ui,sans-serif}
+.leaflet-popup-content b{color:#f1f5f9}
+.leaflet-popup-content hr{border:none;border-top:1px solid rgba(148,163,184,.15);margin:6px 0}
+.pop-eigendom{display:inline-block;padding:2px 8px;border-radius:6px;font-weight:600;font-size:11px}
+.pop-eigendom.koop{background:rgba(34,197,94,.2);color:#4ade80}
+.pop-eigendom.huur{background:rgba(249,115,22,.2);color:#fb923c}
+.pop-eigendom.fam{background:rgba(59,130,246,.2);color:#60a5fa}
+.pop-label{display:inline-block;padding:2px 8px;border-radius:6px;font-weight:700;font-size:11px;color:#fff}
+.leaflet-control-zoom{border:none!important}
+.leaflet-control-zoom a{background:rgba(15,23,42,.85)!important;backdrop-filter:blur(8px);color:#e2e8f0!important;border:1px solid rgba(148,163,184,.15)!important}
+.leaflet-control-zoom a:hover{background:rgba(30,41,59,.95)!important}
+
+/* ── Zoek / nieuw centrum panel ── */
+.search-panel{
+  position:absolute;bottom:20px;right:14px;z-index:1000;
+  background:rgba(15,23,42,.95);backdrop-filter:blur(16px);
+  border:1px solid rgba(148,163,184,.15);border-radius:14px;
+  padding:14px 16px;width:280px;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
+}
+.search-panel.pick-mode{border-color:rgba(239,68,68,.5);box-shadow:0 0 0 3px rgba(239,68,68,.15),0 8px 32px rgba(0,0,0,.4)}
+.sp-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:10px}
+.sp-row{display:flex;gap:6px;margin-bottom:8px}
+.sp-input{
+  flex:1;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.2);
+  border-radius:8px;padding:8px 10px;font-size:13px;color:#e2e8f0;outline:none;
+  font-family:'DM Sans',system-ui,sans-serif;
+}
+.sp-input::placeholder{color:#475569}
+.sp-input:focus{border-color:#3b82f6}
+.sp-input-small{width:72px;flex:none}
+.sp-btn{
+  padding:8px 12px;font-size:12px;font-weight:600;border-radius:8px;cursor:pointer;
+  border:1px solid rgba(148,163,184,.2);background:rgba(148,163,184,.06);
+  color:#e2e8f0;transition:all .15s;font-family:'DM Sans',system-ui,sans-serif;white-space:nowrap;
+}
+.sp-btn:hover{background:rgba(59,130,246,.15);border-color:#3b82f6;color:#93c5fd}
+.sp-btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sp-btn.primary:hover{background:#2563eb}
+.sp-btn.danger{background:#ef4444;border-color:#ef4444;color:#fff}
+.sp-btn.danger:hover{background:#dc2626}
+.sp-btn.solar{background:rgba(234,179,8,.15);border-color:#eab308;color:#facc15}
+.sp-btn.solar:hover{background:rgba(234,179,8,.3)}
+.sp-btn:disabled{opacity:.4;cursor:not-allowed}
+.sp-hint{font-size:11px;color:#64748b;margin-top:4px}
+.sp-divider{border:none;border-top:1px solid rgba(148,163,184,.12);margin:10px 0}
+.sp-pick-indicator{
+  display:none;align-items:center;gap:8px;font-size:12px;color:#fca5a5;font-weight:500;
+}
+.sp-pick-indicator.show{display:flex}
+.sp-pick-dot{width:8px;height:8px;border-radius:50%;background:#ef4444;animation:pulse 1s infinite;flex-shrink:0}
+
+/* Crosshair cursor during pick mode */
+body.picking-location{cursor:crosshair!important}
+body.picking-location #map{cursor:crosshair!important}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- Status bar -->
+<div class="status-bar" id="statusBar">
+  <div class="status-dot"></div>
+  <span class="status-text" id="statusText">Verbinden...</span>
+  <span class="status-progress" id="statusProgress"></span>
+</div>
+
+<!-- Layer toggle -->
+<div class="layer-toggle">
+  <button class="layer-btn active" data-layer="satellite">🛰️ Satelliet</button>
+  <button class="layer-btn" data-layer="map">🗺️ Kaart</button>
+</div>
+
+<!-- Filter panel -->
+<div class="filter-panel">
+  <div class="fp-title">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+    Filters
+  </div>
+  <div class="fp-group">
+    <div class="fp-label">Eigendom</div>
+    <div class="fp-pills" id="eigendomPills">
+      <div class="fp-pill active" data-val="alle">Alle</div>
+      <div class="fp-pill koop" data-val="koop">Koop</div>
+      <div class="fp-pill huur" data-val="huur">Huur</div>
+    </div>
+  </div>
+  <div class="fp-group">
+    <div class="fp-label">Bouwtype</div>
+    <div class="fp-pills" id="bouwtypePills">
+      <div class="fp-pill active" data-val="alle">Beide</div>
+      <div class="fp-pill" data-val="laagbouw">Laagbouw</div>
+      <div class="fp-pill" data-val="hoogbouw">Hoogbouw</div>
+    </div>
+  </div>
+  <div class="fp-group">
+    <div class="fp-label">Min. perceel oppervlakte</div>
+    <div class="fp-range-wrap">
+      <span class="fp-range-val" id="perceelVal">0 m²</span>
+      <input type="range" class="fp-range" id="perceelRange" min="0" max="1000" step="25" value="0">
+    </div>
+  </div>
+  <div class="fp-group">
+    <div class="fp-label">Zonnepanelen</div>
+    <div class="fp-pills" id="solarPills">
+      <div class="fp-pill active" data-val="alle">Alle</div>
+      <div class="fp-pill solar-yes" data-val="ja">☀️ Ja</div>
+      <div class="fp-pill solar-no" data-val="nee">Nee</div>
+    </div>
+  </div>
+  <div class="fp-counts">
+    <div class="fp-count koop"><div class="fp-count-num" id="cntKoop">0</div><div class="fp-count-label">Koop</div></div>
+    <div class="fp-count huur"><div class="fp-count-num" id="cntHuur">0</div><div class="fp-count-label">Huur</div></div>
+    <div class="fp-count solar"><div class="fp-count-num" id="cntSolar">0</div><div class="fp-count-label">☀️ Panelen</div></div>
+    <div class="fp-count total"><div class="fp-count-num" id="cntTotal">0</div><div class="fp-count-label">Zichtbaar</div></div>
+  </div>
+  <button class="fp-export" id="btnExport">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Exporteer selectie
+  </button>
+</div>
+
+<!-- CBS panel (hidden until data arrives) -->
+<div class="cbs-panel" id="cbsPanel"></div>
+
+<!-- Zoek / nieuw centrum panel -->
+<div class="search-panel" id="searchPanel">
+  <div class="sp-title">🎯 Nieuw centrum kiezen</div>
+
+  <!-- Adres invoer -->
+  <div class="sp-row">
+    <input class="sp-input" id="spStraat" placeholder="Straat" autocomplete="off">
+    <input class="sp-input sp-input-small" id="spHuisnr" placeholder="Nr" autocomplete="off">
+  </div>
+  <div class="sp-row">
+    <input class="sp-input" id="spPlaats" placeholder="Plaats" autocomplete="off">
+    <input class="sp-input sp-input-small" id="spStraal" placeholder="Straal" value="200" autocomplete="off" type="number" min="50" max="1000" step="50">
+  </div>
+  <div class="sp-row">
+    <button class="sp-btn primary" id="btnZoek" onclick="zoekAdres()">🔍 Zoeken</button>
+    <button class="sp-btn" id="btnPickMode" onclick="togglePickMode()">📍 Klik op kaart</button>
+  </div>
+  <div class="sp-pick-indicator" id="pickIndicator">
+    <div class="sp-pick-dot"></div>
+    Klik op de kaart om een punt te kiezen
+  </div>
+  <div class="sp-hint" id="spHint"></div>
+
+  <!-- Solar scan knop (verborgen tot adressen geladen zijn) -->
+  <hr class="sp-divider" id="solarDivider" style="display:none">
+  <button class="sp-btn solar" id="btnSolar" style="display:none;width:100%" onclick="startSolarScan()">
+    ☀️ Start zonnepanelen scan
+  </button>
+</div>
+
+<script>
+// ── Config (injected by Python) ──
+const CONFIG = %%CONFIG_JSON%%;
+const WS_URL = 'ws://' + (CONFIG.ws_host || 'localhost') + ':' + CONFIG.ws_port;
+
+// ── State ──
+let allWoningen = [];
+let markers = [];
+let filterEigendom = 'alle';
+let filterBouwtype = 'alle';
+let filterMinPerceel = 0;
+let filterSolar = 'alle';
+
+// ── Map setup ──
+const map = L.map('map', {zoomControl: false}).setView([CONFIG.center_lat, CONFIG.center_lon], 17);
+L.control.zoom({position: 'bottomright'}).addTo(map);
+
+// Satellite layer - Google Maps als API key beschikbaar, anders PDOK
+let satelliteLayer;
+if (CONFIG.google_maps_api_key) {
+  // Google Maps Satellite (scherper!)
+  satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+    maxZoom: 21,
+    attribution: '© Google Maps'
+  });
+} else {
+  // Fallback: PDOK Luchtfoto
+  satelliteLayer = L.tileLayer('https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg', {
+    maxZoom: 20,
+    attribution: '© <a href="https://www.pdok.nl">PDOK</a> Luchtfoto'
+  });
+}
+
+// Dark map layer
+const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  attribution: '© <a href="https://carto.com/">CARTO</a>'
+});
+
+// Start with satellite
+satelliteLayer.addTo(map);
+
+// Layer toggle
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (btn.dataset.layer === 'satellite') {
+      map.removeLayer(darkLayer);
+      satelliteLayer.addTo(map);
+    } else {
+      map.removeLayer(satelliteLayer);
+      darkLayer.addTo(map);
+    }
+  });
+});
+
+// Centrum marker
+if (CONFIG.centrum_lat && CONFIG.centrum_lon) {
+  window._centrumMarker = L.marker([CONFIG.centrum_lat, CONFIG.centrum_lon], {
+    icon: L.divIcon({
+      className:'',
+      html:'<div style="width:16px;height:16px;background:#ef4444;border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px rgba(239,68,68,.6)"></div>',
+      iconSize:[16,16],iconAnchor:[8,8]
+    })
+  }).addTo(map).bindPopup('<b style="color:#f1f5f9">📍 Centrum</b>');
+
+  if (CONFIG.straal) {
+    window._centrumCircle = L.circle([CONFIG.centrum_lat, CONFIG.centrum_lon], {
+      radius: CONFIG.straal, color:'#ef4444', weight:2, opacity:.7,
+      fillColor:'#ef4444', fillOpacity:.05, dashArray:'6,4'
+    }).addTo(map);
+  }
+}
+
+// ── Marker helpers ──
+const COLORS = {
+  KOOP: {fill:'#22c55e', border:'#15803d'},
+  HUUR: {fill:'#f97316', border:'#c2410c'},
+  FAM:  {fill:'#3b82f6', border:'#1d4ed8'},
+  '':   {fill:'#eab308', border:'#a16207'}
+};
+
+const LABEL_COLORS = {
+  'A+++':'#009036','A++':'#009036','A+':'#009036','A':'#009036',
+  'B':'#55ab26','C':'#c8d100','D':'#fff200','E':'#f7a600','F':'#ee7203','G':'#e2001a'
+};
+
+function svgIcon(isHoog, hasSolar) {
+  if (hasSolar) return '<svg viewBox="0 0 24 24" width="14" height="14" fill="#facc15"><circle cx="12" cy="12" r="4" stroke="#a16207" stroke-width="1"/><line x1="12" y1="2" x2="12" y2="6" stroke="#facc15" stroke-width="2"/><line x1="12" y1="18" x2="12" y2="22" stroke="#facc15" stroke-width="2"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34" stroke="#facc15" stroke-width="2"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78" stroke="#facc15" stroke-width="2"/><line x1="2" y1="12" x2="6" y2="12" stroke="#facc15" stroke-width="2"/><line x1="18" y1="12" x2="22" y2="12" stroke="#facc15" stroke-width="2"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66" stroke="#facc15" stroke-width="2"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22" stroke="#facc15" stroke-width="2"/></svg>';
+  if (isHoog) return '<svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M17 11V3H7v4H3v14h8v-4h2v4h8V11h-4zM7 19H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm4 4H9v-2h2v2zm0-4H9V9h2v2zm0-4H9V5h2v2zm4 8h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm4 12h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>';
+  return '<svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>';
+}
+
+function buildPopup(w) {
+  let h = `<b>${w.adres}</b><br>${w.postcode} ${w.plaats}<hr>`;
+  let typeStr = w.woningtype || '';
+  if (!typeStr && w.woningtype_geschat) typeStr = `~${w.woningtype_geschat} ${w.woningtype_zekerheid}%`;
+  if (w.bouwtype) h += `<b>Type:</b> ${w.bouwtype}${typeStr ? ' ('+typeStr+')' : ''}<br>`;
+  if (w.bouwjaar) h += `<b>Bouwjaar:</b> ${w.bouwjaar}<br>`;
+  if (w.woon_opp_m2) h += `<b>Woning:</b> ${Math.round(w.woon_opp_m2)} m²<br>`;
+  if (w.perceel_opp_m2) h += `<b>Perceel:</b> ${Math.round(w.perceel_opp_m2)} m²<br>`;
+  if (w.perceel_gedeeld_door > 1) h += `<b>Gedeeld:</b> ${w.perceel_gedeeld_door} woningen<br>`;
+  h += '<hr>';
+  // Zonnepanelen
+  if (w.zonnepanelen !== undefined) {
+    if (w.zonnepanelen) {
+      h += `<span style="background:rgba(250,204,21,.2);color:#facc15;padding:2px 8px;border-radius:6px;font-weight:600;font-size:11px">☀️ ZONNEPANELEN ${w.zonnepanelen_confidence ? Math.round(w.zonnepanelen_confidence*100)+'%' : ''}</span><br>`;
+    } else {
+      h += `<span style="color:#64748b;font-size:11px">Geen zonnepanelen gedetecteerd</span><br>`;
+    }
+    h += '<hr>';
+  }
+  if (w.eigendom) {
+    const cls = w.eigendom === 'KOOP' ? 'koop' : w.eigendom === 'HUUR' ? 'huur' : 'fam';
+    const txt = {KOOP:'KOOP',HUUR:'HUUR',FAM:'FAMILIE-ERF'}[w.eigendom] || w.eigendom;
+    h += `<span class="pop-eigendom ${cls}">${txt} ${w.eigendom_kans}%</span><br>`;
+    h += `<span style="font-size:11px;color:#94a3b8">Koop ${w.kans_koop}% · Huur ${w.kans_huur}%</span><br>`;
+    if (w.signalen && w.signalen.length) h += `<span style="font-size:11px;color:#64748b;font-style:italic">${w.signalen.slice(0,3).join(', ')}</span><br>`;
+  }
+  if (w.energielabel) {
+    const lc = LABEL_COLORS[w.energielabel] || '#666';
+    h += `<b>Label:</b> <span class="pop-label" style="background:${lc}">${w.energielabel}</span><br>`;
+  }
+  h += `<span style="font-size:11px;color:#64748b">Afstand: ${Math.round(w.afstand_m)}m</span>`;
+  return h;
+}
+
+function createMarkerIcon(w) {
+  const c = COLORS[w.eigendom] || COLORS[''];
+  const isHoog = (w.aantal_in_pand || 1) > 3;
+  const hasSolar = w.zonnepanelen === true;
+  const borderColor = hasSolar ? '#facc15' : c.border;
+  const borderWidth = hasSolar ? 3 : 2;
+  return L.divIcon({
+    className:'',
+    html:`<div style="background:${c.fill};border:${borderWidth}px solid ${borderColor};border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4)${hasSolar ? ',0 0 8px rgba(250,204,21,.5)' : ''}">${svgIcon(isHoog, hasSolar)}</div>`,
+    iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-11]
+  });
+}
+
+function addMarker(w) {
+  const icon = createMarkerIcon(w);
+  const marker = L.marker([w.lat, w.lon], {icon}).bindPopup(buildPopup(w));
+  markers.push({marker, data: w});
+  if (passesFilter(w)) marker.addTo(map);
+}
+
+function updateMarker(index, newData) {
+  // Update woning data
+  Object.assign(allWoningen[index], newData);
+  const w = allWoningen[index];
+  
+  // Find and update marker
+  const m = markers.find(m => m.data === w);
+  if (m) {
+    m.marker.setIcon(createMarkerIcon(w));
+    m.marker.setPopupContent(buildPopup(w));
+  }
+  applyFilters();
+}
+
+// ── Filtering ──
+function passesFilter(w) {
+  if (filterEigendom === 'koop' && w.eigendom !== 'KOOP') return false;
+  if (filterEigendom === 'huur' && w.eigendom !== 'HUUR') return false;
+  const isHoog = (w.aantal_in_pand || 1) > 3;
+  if (filterBouwtype === 'laagbouw' && isHoog) return false;
+  if (filterBouwtype === 'hoogbouw' && !isHoog) return false;
+  if (filterMinPerceel > 0 && (w.perceel_opp_m2 || 0) < filterMinPerceel) return false;
+  if (filterSolar === 'ja' && w.zonnepanelen !== true) return false;
+  if (filterSolar === 'nee' && w.zonnepanelen === true) return false;
+  return true;
+}
+
+function applyFilters() {
+  let cntK=0, cntH=0, cntS=0, cntT=0;
+  markers.forEach(m => {
+    const show = passesFilter(m.data);
+    if (show) {
+      if (!map.hasLayer(m.marker)) m.marker.addTo(map);
+      cntT++;
+      if (m.data.eigendom === 'KOOP') cntK++;
+      else if (m.data.eigendom === 'HUUR') cntH++;
+      if (m.data.zonnepanelen === true) cntS++;
+    } else {
+      map.removeLayer(m.marker);
+    }
+  });
+  document.getElementById('cntKoop').textContent = cntK;
+  document.getElementById('cntHuur').textContent = cntH;
+  document.getElementById('cntSolar').textContent = cntS;
+  document.getElementById('cntTotal').textContent = cntT;
+}
+
+// Pill buttons
+function setupPills(containerId, callback) {
+  document.getElementById(containerId).querySelectorAll('.fp-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.getElementById(containerId).querySelectorAll('.fp-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      callback(pill.dataset.val);
+    });
+  });
+}
+setupPills('eigendomPills', val => { filterEigendom = val; applyFilters(); });
+setupPills('bouwtypePills', val => { filterBouwtype = val; applyFilters(); });
+setupPills('solarPills', val => { filterSolar = val; applyFilters(); });
+
+document.getElementById('perceelRange').addEventListener('input', e => {
+  filterMinPerceel = parseInt(e.target.value);
+  document.getElementById('perceelVal').textContent = filterMinPerceel === 0 ? '0 m²' : `≥ ${filterMinPerceel} m²`;
+  applyFilters();
+});
+
+// ── CSV Export ──
+document.getElementById('btnExport').addEventListener('click', () => {
+  const filtered = allWoningen.filter(passesFilter);
+  if (!filtered.length) { alert('Geen woningen in selectie'); return; }
+  const sep = ';';
+  const header = ['nr','straat','huisnr','huisletter','toevoeging','postcode','plaats','lat','lon','afstand_m','bouwtype','woningtype','bouwjaar','woon_opp_m2','perceel_opp_m2','eigendom','eigendom_kans','energielabel','zonnepanelen','zonnepanelen_confidence'];
+  let csv = header.join(sep) + '\n';
+  filtered.forEach((w, i) => {
+    csv += [i+1, w.straat, w.huisnr, w.huisletter||'', w.toevoeging||'', w.postcode, w.plaats, w.lat, w.lon, Math.round(w.afstand_m), w.bouwtype, w.woningtype||w.woningtype_geschat||'', w.bouwjaar||'', w.woon_opp_m2||'', w.perceel_opp_m2||'', w.eigendom, w.eigendom_kans, w.energielabel||'', w.zonnepanelen?'ja':'nee', w.zonnepanelen_confidence||''].join(sep) + '\n';
+  });
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `buurtdata_${filterEigendom}_${filterBouwtype}_${filtered.length}.csv`;
+  a.click();
+});
+
+// ── WebSocket ──
+const statusBar = document.getElementById('statusBar');
+const statusText = document.getElementById('statusText');
+const statusProgress = document.getElementById('statusProgress');
+let ws = null; // global ws reference for solar trigger
+
+function setStatus(state, text, progress='') {
+  statusBar.className = 'status-bar ' + state;
+  statusText.textContent = text;
+  statusProgress.textContent = progress;
+}
+
+// ── Pick mode (klik op kaart) ──
+let pickModeActive = false;
+let pickMarker = null;
+
+function togglePickMode() {
+  pickModeActive = !pickModeActive;
+  const btn = document.getElementById('btnPickMode');
+  const indicator = document.getElementById('pickIndicator');
+  const panel = document.getElementById('searchPanel');
+  if (pickModeActive) {
+    btn.textContent = '✖ Annuleer';
+    btn.classList.add('danger');
+    indicator.classList.add('show');
+    panel.classList.add('pick-mode');
+    document.body.classList.add('picking-location');
+  } else {
+    btn.textContent = '📍 Klik op kaart';
+    btn.classList.remove('danger');
+    indicator.classList.remove('show');
+    panel.classList.remove('pick-mode');
+    document.body.classList.remove('picking-location');
+  }
+}
+
+map.on('click', function(e) {
+  if (!pickModeActive) return;
+
+  const {lat, lng} = e.latlng;
+
+  // Zet tijdelijke marker
+  if (pickMarker) map.removeLayer(pickMarker);
+  pickMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      className:'',
+      html:'<div style="width:20px;height:20px;background:#ef4444;border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px rgba(239,68,68,.7)"></div>',
+      iconSize:[20,20],iconAnchor:[10,10]
+    })
+  }).addTo(map);
+
+  // Vul coördinaten in als placeholder
+  document.getElementById('spStraat').value = '';
+  document.getElementById('spHuisnr').value = '';
+  document.getElementById('spPlaats').value = '';
+  document.getElementById('spHint').textContent = `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} — vul straal in en klik Zoeken`;
+
+  // Sla gekozen punt op voor zoekactie
+  window._pickedLatLng = {lat, lng};
+
+  togglePickMode();
+});
+
+// ── Adres zoeken / nieuw centrum starten ──
+async function zoekAdres() {
+  const straat = document.getElementById('spStraat').value.trim();
+  const huisnr = document.getElementById('spHuisnr').value.trim();
+  const plaats = document.getElementById('spPlaats').value.trim();
+  const straal = parseInt(document.getElementById('spStraal').value) || 200;
+  const hint = document.getElementById('spHint');
+  const btn = document.getElementById('btnZoek');
+
+  // Via gekozen kaartpunt
+  if (!straat && window._pickedLatLng) {
+    const {lat, lng} = window._pickedLatLng;
+    hint.textContent = '⏳ Verbinden met Python...';
+    btn.disabled = true;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'new_search', lat, lon: lng, straal}));
+      hint.textContent = `✓ Nieuwe scan gestart rond kaartpunt (${straal}m)`;
+    } else {
+      hint.textContent = '❌ Geen actieve verbinding met Python';
+    }
+    btn.disabled = false;
+    return;
+  }
+
+  // Via adres
+  if (!straat || !huisnr || !plaats) {
+    hint.textContent = '⚠️ Vul straat, huisnummer en plaats in';
+    return;
+  }
+
+  hint.textContent = '⏳ Adres opzoeken...';
+  btn.disabled = true;
+
+  try {
+    // PDOK geocode
+    const r = await fetch(`https://api.pdok.nl/bzk/locatieserver/search/v3_1/free?q=${encodeURIComponent(straat+' '+huisnr+' '+plaats)}&rows=1&fl=centroide_ll,weergavenaam`);
+    const data = await r.json();
+    const docs = data?.response?.docs;
+    if (!docs || !docs.length) {
+      hint.textContent = '❌ Adres niet gevonden';
+      btn.disabled = false;
+      return;
+    }
+
+    const doc = docs[0];
+    const coord = doc.centroide_ll.replace('POINT(','').replace(')','').split(' ');
+    const lon = parseFloat(coord[0]);
+    const lat = parseFloat(coord[1]);
+
+    // Verplaats kaart
+    map.setView([lat, lon], 17);
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'new_search', lat, lon, straat, huisnr, plaats, straal}));
+      hint.textContent = `✓ Scan gestart: ${doc.weergavenaam} (${straal}m)`;
+    } else {
+      // Geen actieve WS: herlaad de pagina met nieuwe params via hash
+      hint.textContent = `✓ Gevonden: ${doc.weergavenaam} — herstart Python met dit adres`;
+    }
+  } catch(e) {
+    hint.textContent = '❌ Fout bij geocoden: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// Enter key in zoekvelden
+['spStraat','spHuisnr','spPlaats','spStraal'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') zoekAdres();
+  });
+});
+
+// ── Solar scan knop ──
+function startSolarScan() {
+  const btn = document.getElementById('btnSolar');
+  btn.disabled = true;
+  btn.textContent = '⏳ Zonnepanelen scannen...';
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'start_solar'}));
+  }
+}
+
+function connect() {
+  setStatus('', 'Verbinden...');
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    setStatus('connected', 'Verbonden, wachten op data...');
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    switch(msg.type) {
+      case 'init':
+        setStatus('loading', 'Data ophalen...', `0/${msg.total_expected || '?'}`);
+        break;
+
+      case 'status':
+        setStatus('loading', msg.text, msg.progress || '');
+        break;
+
+      case 'woning':
+        allWoningen.push(msg.data);
+        addMarker(msg.data);
+        applyFilters();
+        break;
+
+      case 'batch':
+        msg.data.forEach(w => {
+          allWoningen.push(w);
+          addMarker(w);
+        });
+        applyFilters();
+        setStatus('loading', msg.status || 'Laden...', `${allWoningen.length}`);
+        break;
+
+      case 'cbs':
+        document.getElementById('cbsPanel').innerHTML = msg.html;
+        document.getElementById('cbsPanel').classList.add('show');
+        break;
+
+      case 'solar_update':
+        // Update marker with solar panel detection result
+        if (msg.index !== undefined && msg.data) {
+          updateMarker(msg.index, msg.data);
+        }
+        break;
+
+      case 'solar_ready': {
+        // Toon solar scan knop
+        const solarBtn = document.getElementById('btnSolar');
+        const solarDiv = document.getElementById('solarDivider');
+        solarBtn.style.display = 'block';
+        solarDiv.style.display = 'block';
+        solarBtn.textContent = `☀️ Start zonnepanelen scan (${msg.count} woningen)`;
+        solarBtn.disabled = false;
+        break;
+      }
+
+      case 'new_search_started':
+        // Reset markers en panels
+        allWoningen = [];
+        markers.forEach(m => map.removeLayer(m.marker));
+        markers = [];
+        document.getElementById('btnSolar').style.display = 'none';
+        document.getElementById('solarDivider').style.display = 'none';
+        document.getElementById('btnSolar').disabled = false;
+        document.getElementById('cbsPanel').innerHTML = '';
+        document.getElementById('cbsPanel').classList.remove('show');
+        applyFilters();
+
+        // Verplaats kaart + herteken centrum/cirkel
+        if (msg.lat && msg.lon) {
+          map.setView([msg.lat, msg.lon], 17);
+
+          // Verwijder oude centrum marker + cirkel
+          if (window._centrumMarker) map.removeLayer(window._centrumMarker);
+          if (window._centrumCircle) map.removeLayer(window._centrumCircle);
+
+          window._centrumMarker = L.marker([msg.lat, msg.lon], {
+            icon: L.divIcon({
+              className:'',
+              html:'<div style="width:16px;height:16px;background:#ef4444;border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px rgba(239,68,68,.6)"></div>',
+              iconSize:[16,16],iconAnchor:[8,8]
+            })
+          }).addTo(map).bindPopup(`<b style="color:#f1f5f9">📍 ${msg.label || 'Centrum'}</b>`);
+
+          if (msg.straal) {
+            window._centrumCircle = L.circle([msg.lat, msg.lon], {
+              radius: msg.straal, color:'#ef4444', weight:2, opacity:.7,
+              fillColor:'#ef4444', fillOpacity:.05, dashArray:'6,4'
+            }).addTo(map);
+          }
+        }
+
+        // Toon statusbar weer en geef feedback
+        statusBar.style.display = '';
+        statusBar.style.opacity = '1';
+        setStatus('loading', msg.label ? `Scannen: ${msg.label}` : 'Nieuwe scan gestart...', '');
+        document.getElementById('spHint').textContent = `✓ Scan gestart${msg.straal ? ' ('+msg.straal+'m)' : ''}`;
+        break;
+
+      case 'complete':
+        setStatus('connected', 'Compleet!', `${allWoningen.length} woningen`);
+        setTimeout(() => {
+          statusBar.style.opacity = '0';
+          setTimeout(() => statusBar.style.display = 'none', 300);
+        }, 3000);
+        break;
+
+      case 'error':
+        setStatus('error', msg.text);
+        break;
+    }
+  };
+
+  ws.onerror = () => {
+    setStatus('error', 'Verbindingsfout');
+  };
+
+  ws.onclose = () => {
+    if (allWoningen.length === 0) {
+      setStatus('error', 'Verbinding verbroken');
+      setTimeout(connect, 2000); // Auto-reconnect
+    }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
